@@ -1,0 +1,77 @@
+version: '3.8'
+
+services:
+  db:
+    image: postgis/postgis:15-3.3
+    container_name: twistmaster-db
+    environment:
+      POSTGRES_DB: twistmaster
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: secret
+    volumes:
+      - ./postgres_data:/var/lib/postgresql/data
+      - ./init-db.sql:/docker-entrypoint-initdb.d/init-db.sql
+    ports:
+      - "5432:5432"
+    networks:
+      - twistmaster-net
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres -d twistmaster"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+  osrm:
+    image: osrm/osrm-backend
+    container_name: twistmaster-osrm
+    environment:
+      - OSM_FILE=cumbria-latest.osm.pbf  # Default filename, can override in .env
+    volumes:
+      - ./osrm-data:/data
+    command: >
+      sh -c "
+        if [ ! -f /data/$$OSM_FILE ]; then
+          echo 'Error: OSM file /data/$$OSM_FILE not found!';
+          exit 1;
+        fi &&
+        osrm-extract -p /opt/car.lua /data/$$OSM_FILE &&
+        osrm-partition /data/$${OSM_FILE%.*}.osrm &&
+        osrm-customize /data/$${OSM_FILE%.*}.osrm &&
+        osrm-routed --algorithm mld /data/$${OSM_FILE%.*}.osrm
+      "
+    ports:
+      - "5000:5000"
+    networks:
+      - twistmaster-net
+    depends_on:
+      db:
+        condition: service_healthy
+
+  backend:
+    build: ./twistmaster-backend
+    container_name: twistmaster-backend
+    environment:
+      DB_HOST: db
+      DB_PORT: 5432
+      DB_USER: postgres
+      DB_PASSWORD: secret
+      DB_NAME: twistmaster
+      OSRM_URL: http://osrm:5000
+      WAIT_HOSTS: db:5432
+    ports:
+      - "3001:3001"
+    networks:
+      - twistmaster-net
+    depends_on:
+      db:
+        condition: service_healthy
+      osrm:
+        condition: service_started
+    restart: unless-stopped
+
+volumes:
+  postgres_data:
+  osrm-data:
+
+networks:
+  twistmaster-net:

@@ -1,3 +1,13 @@
+# Twistmaster
+---
+
+## Running with Docker
+
+Run the command:
+```bash
+docker compose up --build
+```
+
 ## Database Setup
 
 1. Start PostgreSQL database in docker:
